@@ -56,7 +56,36 @@ public:
                 std::cout << "0:" << triangle[i][0] << std::endl;
                 std::cout << "1:" << triangle[i][1] << std::endl;
                 std::cout << "2:" << triangle[i][2] << std::endl;
-                cv::drawContours(frame_copy, triangle, i, cv::Scalar(0,0,255), 2);
+            }
+            for (size_t i =0; i < triangle.size(); i++)
+            {
+                double length0_square = (triangle[i][1].x - triangle[i][2].x)*(triangle[i][1].x - triangle[i][2].x) + (triangle[i][1].y - triangle[i][2].y)*(triangle[i][1].y - triangle[i][2].y);
+                double length1_square = (triangle[i][0].x - triangle[i][2].x)*(triangle[i][0].x - triangle[i][2].x) + (triangle[i][0].y - triangle[i][2].y)*(triangle[i][0].y - triangle[i][2].y);
+                double length2_square = (triangle[i][1].x - triangle[i][0].x)*(triangle[i][1].x - triangle[i][0].x) + (triangle[i][1].y - triangle[i][0].y)*(triangle[i][1].y - triangle[i][0].y);
+                RCLCPP_INFO(get_logger(), "length0_square: %f", length0_square);
+                RCLCPP_INFO(get_logger(), "length1_square: %f", length1_square);
+                RCLCPP_INFO(get_logger(), "length2_square: %f", length2_square);
+                if (length0_square > length1_square && length0_square > length2_square)
+                {
+                    Points.push_back(triangle[i][0]);
+                    RCLCPP_INFO(get_logger(), "Mark0");
+                }
+                else if (length1_square > length0_square && length1_square > length2_square)
+                {
+                    Points.push_back(triangle[i][1]);
+                    RCLCPP_INFO(get_logger(), "Mark1");
+                }
+                else if (length2_square > length0_square && length2_square > length1_square)
+                {
+                    Points.push_back(triangle[i][2]);
+                    RCLCPP_INFO(get_logger(), "Mark2");
+
+                }
+                RCLCPP_INFO(get_logger(), "Points selection done");
+            }
+            for (size_t i = 0; i < Points.size(); i++)
+            {
+                cv::circle(frame_copy, Points[i], 5, cv::Scalar(0, 255, 0), cv::FILLED);
             }
         }
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();

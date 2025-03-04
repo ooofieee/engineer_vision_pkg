@@ -50,7 +50,7 @@ public:
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    std::string path = "/home/ooofieee/redeem_station/red_redeem_station(facade).mp4";
+    std::string path = "/home/ooofieee/redeem_station/red_redeem_box(facade).mp4";
     auto node = std::make_shared<video_capturer_node>("video_capturer_node", path);
     rclcpp::spin(node);
     rclcpp::shutdown();
