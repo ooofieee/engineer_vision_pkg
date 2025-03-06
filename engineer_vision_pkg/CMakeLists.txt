@@ -17,11 +17,13 @@ find_package(std_msgs REQUIRED)
 
 add_executable(video_capturer_node src/video_capturer_node.cpp)
 add_executable(redeem_box_node src/redeem_box_node.cpp)
+# add_executable(yolo_node src/yolo_node.cpp)
 ament_target_dependencies(video_capturer_node rclcpp sensor_msgs cv_bridge std_msgs)
 ament_target_dependencies(redeem_box_node rclcpp sensor_msgs cv_bridge)
+# ament_target_dependencies(yolo_node rclcpp sensor_msgs cv_bridge)
 target_link_libraries(video_capturer_node ${OpenCV_LIBRARIES})
 target_link_libraries(redeem_box_node ${OpenCV_LIBRARIES})
-
+# target_link_libraries(yolo_node ${OpenCV_LIBRARIES})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -39,6 +41,5 @@ install(
   TARGETS video_capturer_node redeem_box_node
   DESTINATION lib/${PROJECT_NAME}
 )
-
 
 ament_package()

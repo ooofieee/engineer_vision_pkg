@@ -16,7 +16,7 @@ private:
     int hmax = 44, smax = 97, vmax = 255;
     double contourArea;
     float peri;
-
+    std::vector<cv::Point> Points;
 
 public:
     explicit redeem_box_node(const std::string &node_name) : Node(node_name)
@@ -42,52 +42,66 @@ public:
         dilate(frame, frame, element);
         cv::findContours(frame, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         RCLCPP_INFO(get_logger(), "Found %lu contours", contours.size());
+        
         std::vector<std::vector<cv::Point>> conPoly(contours.size());
-        std::vector<std::vector<cv::Point>> triangle(contours.size());
-        std::vector<cv::Point> Points;        
+        std::vector<std::vector<cv::Point>> triangle;
+        Points.clear();
+        
         for (size_t i = 0; i < contours.size(); i++)
         {   
             contourArea = cv::contourArea(contours[i]);
-            if (contourArea < 10 || contourArea > 100)
+            if (contourArea > 1500 || contourArea < 1550)
             {
                 peri = cv::arcLength(contours[i], true);
                 cv::approxPolyDP(contours[i], conPoly[i], 0.02*peri, true);
-                cv::minEnclosingTriangle(conPoly[i], triangle[i]);
-                std::cout << "0:" << triangle[i][0] << std::endl;
-                std::cout << "1:" << triangle[i][1] << std::endl;
-                std::cout << "2:" << triangle[i][2] << std::endl;
-            }
-            for (size_t i =0; i < triangle.size(); i++)
-            {
-                double length0_square = (triangle[i][1].x - triangle[i][2].x)*(triangle[i][1].x - triangle[i][2].x) + (triangle[i][1].y - triangle[i][2].y)*(triangle[i][1].y - triangle[i][2].y);
-                double length1_square = (triangle[i][0].x - triangle[i][2].x)*(triangle[i][0].x - triangle[i][2].x) + (triangle[i][0].y - triangle[i][2].y)*(triangle[i][0].y - triangle[i][2].y);
-                double length2_square = (triangle[i][1].x - triangle[i][0].x)*(triangle[i][1].x - triangle[i][0].x) + (triangle[i][1].y - triangle[i][0].y)*(triangle[i][1].y - triangle[i][0].y);
-                RCLCPP_INFO(get_logger(), "length0_square: %f", length0_square);
-                RCLCPP_INFO(get_logger(), "length1_square: %f", length1_square);
-                RCLCPP_INFO(get_logger(), "length2_square: %f", length2_square);
-                if (length0_square > length1_square && length0_square > length2_square)
+                
+                std::vector<cv::Point> current_triangle;
+                cv::minEnclosingTriangle(conPoly[i], current_triangle);
+                
+                if (current_triangle.size() == 3)
                 {
-                    Points.push_back(triangle[i][0]);
-                    RCLCPP_INFO(get_logger(), "Mark0");
+                    triangle.push_back(current_triangle);
+                    RCLCPP_INFO(get_logger(), "Triangle %zu vertices:", i);
+                    for (int j = 0; j < 3; j++) {
+                        RCLCPP_INFO(get_logger(), "%d: (%d, %d)", j, current_triangle[j].x, current_triangle[j].y);
+                    }
                 }
-                else if (length1_square > length0_square && length1_square > length2_square)
-                {
-                    Points.push_back(triangle[i][1]);
-                    RCLCPP_INFO(get_logger(), "Mark1");
-                }
-                else if (length2_square > length0_square && length2_square > length1_square)
-                {
-                    Points.push_back(triangle[i][2]);
-                    RCLCPP_INFO(get_logger(), "Mark2");
-
-                }
-                RCLCPP_INFO(get_logger(), "Points selection done");
-            }
-            for (size_t i = 0; i < Points.size(); i++)
-            {
-                cv::circle(frame_copy, Points[i], 5, cv::Scalar(0, 255, 0), cv::FILLED);
             }
         }
+        
+        for (size_t i = 0; i < triangle.size(); i++)
+        {
+            double length0_square = (triangle[i][1].x - triangle[i][2].x)*(triangle[i][1].x - triangle[i][2].x) + 
+                                  (triangle[i][1].y - triangle[i][2].y)*(triangle[i][1].y - triangle[i][2].y);
+            double length1_square = (triangle[i][0].x - triangle[i][2].x)*(triangle[i][0].x - triangle[i][2].x) + 
+                                  (triangle[i][0].y - triangle[i][2].y)*(triangle[i][0].y - triangle[i][2].y);
+            double length2_square = (triangle[i][1].x - triangle[i][0].x)*(triangle[i][1].x - triangle[i][0].x) + 
+                                  (triangle[i][1].y - triangle[i][0].y)*(triangle[i][1].y - triangle[i][0].y);
+            
+            RCLCPP_INFO(get_logger(), "Triangle %zu lengths: %f, %f, %f", i, length0_square, length1_square, length2_square);
+            
+            if (length0_square > length1_square && length0_square > length2_square)
+            {
+                Points.push_back(triangle[i][0]);
+                RCLCPP_INFO(get_logger(), "Selected point 0");
+            }
+            else if (length1_square > length0_square && length1_square > length2_square)
+            {
+                Points.push_back(triangle[i][1]);
+                RCLCPP_INFO(get_logger(), "Selected point 1");
+            }
+            else if (length2_square > length0_square && length2_square > length1_square)
+            {
+                Points.push_back(triangle[i][2]);
+                RCLCPP_INFO(get_logger(), "Selected point 2");
+            }
+        }
+        
+        for (const auto& point : Points)
+        {
+            cv::circle(frame_copy, point, 5, cv::Scalar(0, 255, 0), cv::FILLED);
+        }
+        
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
         publisher_->publish(*msg_);
     }
