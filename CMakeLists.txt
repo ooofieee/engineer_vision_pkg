@@ -35,7 +35,7 @@ ament_target_dependencies(redeem_box_node
   geometry_msgs
   serial
 )
-ament_target_dependencies(serial rclcpp tf2 tf2_ros tf2_geometry_msgs geometry_msgs)
+ament_target_dependencies(serial_node rclcpp tf2 tf2_ros tf2_geometry_msgs geometry_msgs)
 # ament_target_dependencies(yolo_node rclcpp sensor_msgs cv_bridge)
 target_link_libraries(video_capturer_node ${OpenCV_LIBRARIES})
 target_link_libraries(redeem_box_node ${OpenCV_LIBRARIES})
