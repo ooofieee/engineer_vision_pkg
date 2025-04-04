@@ -7,6 +7,7 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp" 
 #include "tf2/LinearMath/Quaternion.h"             
 #include "tf2_ros/transform_broadcaster.h" 
+#include "serial/serial.h"
 
 class redeem_box_node :public rclcpp::Node
 {
@@ -31,6 +32,7 @@ private:
     cv::Point2f center;
     cv::Mat camera_matrix, distortion_coefficients, rectification_matrix, projection_matrix, rvec, tvec;
     std::vector<cv::Point3f> objPoints;
+    cv::Mat obj2Cam = cv::Mat::zeros(3, 3, CV_64FC1);
     geometry_msgs::msg::TransformStamped transformation;
     tf2::Quaternion q;
     double roll, pitch, yaw;
@@ -39,12 +41,13 @@ public:
     explicit redeem_box_node(const std::string &node_name) : Node(node_name)
     {
         RCLCPP_INFO(get_logger(), "redeem_box_node launched");
-        loadCameraParams();
+        //loadCameraParams();
         publisher_ = this->create_publisher<sensor_msgs::msg::Image>("processed_image", 10);
         this->broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         subscriber_ = this->create_subscription<sensor_msgs::msg::Image>("redeem_box_image", 10, [&](const sensor_msgs::msg::Image::SharedPtr msg) ->void {
             image_preprocess(msg);
-            publish_tf(tvec, roll, pitch, yaw);
+            //pnpSolver();
+            //publish_tf(tvec, roll, pitch, yaw);
         });
 
     }
@@ -91,13 +94,10 @@ public:
         bool succees = solvePnP(objPoints, Points, camera_matrix, distortion_coefficients, rvec, tvec, cv::SOLVEPNP_IPPE_SQUARE);
         if (!succees)
         {
-            cv::Mat obj2Cam = cv::Mat::zeros(4, 4, CV_64FC1);
-            Rodrigues(rvec, obj2Cam(cv::Rect(0, 0, 3, 3)));
-            tvec.copyTo(obj2Cam(cv::Rect(3, 0, 1, 3)));
-            
-            roll = atan2(obj2Cam.at<double>(2,1), obj2Cam.at<double>(2,2));
-            pitch = atan2(-obj2Cam.at<double>(2,0), sqrt(obj2Cam.at<double>(2,1)*obj2Cam.at<double>(2,1) + obj2Cam.at<double>(2,2)*obj2Cam.at<double>(2,2)));
-            yaw = atan2(obj2Cam.at<double>(1,0), obj2Cam.at<double>(0,0));
+            Rodrigues(rvec, obj2Cam);
+            roll = atan2(obj2Cam.at<double>(2, 1), obj2Cam.at<double>(2, 2));
+            pitch = atan2(-obj2Cam.at<double>(2, 0), sqrt(obj2Cam.at<double>(2, 1) * obj2Cam.at<double>(2, 1) + obj2Cam.at<double>(2, 2) * obj2Cam.at<double>(2, 2)));
+            yaw = atan2(obj2Cam.at<double>(1, 0), obj2Cam.at<double>(0, 0));
         }
         else
         {
