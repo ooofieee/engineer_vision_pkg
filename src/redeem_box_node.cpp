@@ -174,7 +174,7 @@ public:
             }
         }
         RCLCPP_INFO(get_logger(), "%lu triangles found", index.size());
-        if (index.size() == 4)
+        if (index.size() >= 4)
         {
             center = (circle[index[0]] + circle[index[1]] + circle[index[2]] + circle[index[3]]) /4;
             RCLCPP_INFO(get_logger(), "center: (%f, %f)", center.x, center.y);
@@ -182,7 +182,8 @@ public:
             RCLCPP_INFO(get_logger(), "circle: (%f, %f)", circle[index[1]].x, circle[index[1]].y);
             RCLCPP_INFO(get_logger(), "circle: (%f, %f)", circle[index[2]].x, circle[index[2]].y);
             RCLCPP_INFO(get_logger(), "circle: (%f, %f)", circle[index[3]].x, circle[index[3]].y);
-            for(int i = 0 ; i < 4; i++)
+            
+            for(int i = 0; i < std::min(4, static_cast<int>(index.size())); i++)
             {
                 if (triangle[index[i]].size() == 3) 
                 {
@@ -192,7 +193,6 @@ public:
                                             (triangle[index[i]][0].y - triangle[index[i]][2].y)*(triangle[index[i]][0].y - triangle[index[i]][2].y);
                     double length2_square = (triangle[index[i]][1].x - triangle[index[i]][0].x)*(triangle[index[i]][1].x - triangle[index[i]][0].x) + 
                                             (triangle[index[i]][1].y - triangle[index[i]][0].y)*(triangle[index[i]][1].y - triangle[index[i]][0].y);
-                    
                     
                     if (length0_square > length1_square && length0_square > length2_square)
                     {
@@ -227,10 +227,6 @@ public:
             }
         }
 
-        for(int i = 0; i < index.size(); i++)
-        {
-           cv::line(frame_copy, Points[index[i]], center, cv::Scalar(0, 255, 0), 2);
-        }
         cv::circle(frame_copy, center, 5, cv::Scalar(0,100,200), cv::FILLED);
         RCLCPP_INFO(get_logger(), "Points_size: %lu", Points.size());
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
