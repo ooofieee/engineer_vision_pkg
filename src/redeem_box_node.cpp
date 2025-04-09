@@ -16,7 +16,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr publisher_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> broadcaster_;
     cv_bridge::CvImagePtr framePtr;
-    cv::Mat frame, element, frame_preprocessed, frame_copy;
+    cv::Mat frame, dil_kernel, ero_kernel, frame_preprocessed, frame_copy;
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Vec4i> hierarchy;
     int hmin = 0, smin = 0, vmin = 245;
@@ -26,7 +26,7 @@ private:
     std::vector<std::vector<cv::Point>> conPoly;
     std::vector<std::vector<cv::Point2f>> triangle;
     std::vector<cv::Point2f> circle;
-    std::vector<float> radius;
+    std::vector<float> radius, Point2O;
     std::vector<int> index;
     std::vector<cv::Point> Points;
     std::queue<std::vector<cv::Point>> point_queue;
@@ -138,9 +138,10 @@ public:
         cv::Scalar lowerHSV(hmin, smin, vmin);
         cv::Scalar upperHSV(hmax, smax, vmax);
         cv::inRange(frame, lowerHSV, upperHSV, frame);
-        element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(13, 13));
-
-        dilate(frame, frame, element);
+        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(17, 17));
+        ero_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+        cv::erode(frame, frame, ero_kernel);
+        cv::dilate(frame, frame, dil_kernel);
         cv::findContours(frame, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         RCLCPP_INFO(get_logger(), "%lu contours found", contours.size());
 
@@ -174,7 +175,7 @@ public:
             }
         }
         RCLCPP_INFO(get_logger(), "%lu triangles found", index.size());
-        if (index.size() >= 4)
+        if (index.size() == 4)
         {
             center = (circle[index[0]] + circle[index[1]] + circle[index[2]] + circle[index[3]]) /4;
             RCLCPP_INFO(get_logger(), "center: (%f, %f)", center.x, center.y);
@@ -210,8 +211,30 @@ public:
             }
         }
 
+        // for (size_t i = 0; i < index.size(); i++)
+        // {
+        //     Point2O[i] = (circle[index[i]].x)*(circle[index[i]].x) + (circle[index[i]].y)*(circle[index[i]].y);
+        // }
+        // for (size_t i = 0; i < index.size()-1; i++)
+        // {
+        //     if (Point2O[i] <= Point2O[i+1])
+        //     {
+        //         std::swap(Point2O[i], Point2O[i+1]);
+        //         std::swap(circle[index[i]], circle[index[i+1]]);
+        //         std::swap(radius[index[i]], radius[index[i+1]]);
+        //     }
+        // }
+
 
         // Points = filter(Points);
+
+        // for (size_t i = 0;i< index.size(); i++)
+        // {
+        //     if (circle[index[i]] == cv::Point2f(0.0,0.0))
+        //     {
+        //         circle[index[i]] = 
+        //     }
+        // }
 
 
         for (const auto& point : Points)
@@ -227,6 +250,10 @@ public:
             }
         }
 
+        cv::line(frame_copy, circle[index[0]], circle[index[1]], cv::Scalar(255, 0, 0), 2);
+        cv::line(frame_copy, circle[index[1]], circle[index[3]], cv::Scalar(255, 0, 0), 2);
+        cv::line(frame_copy, circle[index[2]], circle[index[3]], cv::Scalar(255, 0, 0), 2);
+        cv::line(frame_copy, circle[index[2]], circle[index[0]], cv::Scalar(255, 0, 0), 2);
         cv::circle(frame_copy, center, 5, cv::Scalar(0,100,200), cv::FILLED);
         RCLCPP_INFO(get_logger(), "Points_size: %lu", Points.size());
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
