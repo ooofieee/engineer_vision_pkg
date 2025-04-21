@@ -32,7 +32,7 @@ private:
     std::queue<std::vector<cv::Point2f>> point_queue;
     cv::Point2f center;
     cv::Mat camera_matrix, distortion_coefficients, rectification_matrix, projection_matrix, rvec, tvec;
-    std::vector<cv::Point3f> objPoints;
+    std::vector<cv::Point2f> objPoints;
     cv::Mat obj2Cam = cv::Mat::zeros(3, 3, CV_64FC1);
     geometry_msgs::msg::TransformStamped transformation;
     tf2::Quaternion q;
@@ -46,11 +46,11 @@ public:
         publisher_ = this->create_publisher<sensor_msgs::msg::Image>("processed_image", 10);
         this->broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         subscriber_ = this->create_subscription<sensor_msgs::msg::Image>("redeem_box_image", 10, [&](const sensor_msgs::msg::Image::SharedPtr msg) -> void
-                                                                         {
-                                                                             image_preprocess(msg);
-                                                                             // pnpSolver();
-                                                                             // publish_tf(tvec, roll, pitch, yaw);
-                                                                         });
+        {
+            image_preprocess(msg);
+             // pnpSolver();
+             // publish_tf(tvec, roll, pitch, yaw);
+        });
     }
 
     void loadCameraParams()
@@ -66,7 +66,7 @@ public:
     std::vector<cv::Point2f> filter(std::vector<cv::Point2f> &points)
     {
         std::vector<cv::Point2f> point_temp(4);
-        if (point_queue.size() < 2)
+        if (point_queue.size() < 2 && index.size() == 4)
         {
             point_queue.push(points);
         }
@@ -92,7 +92,7 @@ public:
 
     void pnpSolver()
     {
-        bool succees = solvePnP(objPoints, Points, camera_matrix, distortion_coefficients, rvec, tvec, cv::SOLVEPNP_IPPE_SQUARE);
+        bool succees = cv::solvePnP(objPoints, Points, camera_matrix, distortion_coefficients, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
         if (!succees)
         {
             Rodrigues(rvec, obj2Cam);
@@ -123,10 +123,6 @@ public:
         broadcaster_->sendTransform(transformation);
     }
 
-    void Left_or_Right()
-    {
-
-    }
 
     void image_preprocess(const sensor_msgs::msg::Image::SharedPtr msg)
     {
@@ -144,9 +140,9 @@ public:
         cv::Scalar lowerHSV(hmin, smin, vmin);
         cv::Scalar upperHSV(hmax, smax, vmax);
         cv::inRange(frame, lowerHSV, upperHSV, frame);
-        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(37, 37));
-        ero_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7, 7));
-        // cv::erode(frame, frame, ero_kernel);
+        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(23, 23));
+        ero_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 1));
+        cv::erode(frame, frame, ero_kernel);
         cv::dilate(frame, frame, dil_kernel);
         cv::findContours(frame, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         RCLCPP_INFO(get_logger(), "%lu contours found", contours.size());
@@ -167,7 +163,7 @@ public:
         for (size_t i = 0; i < contours.size(); i++)
         {
             contourArea = cv::contourArea(contours[i]);
-            if (contourArea > 1550 && contourArea < 12000)
+            if (contourArea > 1000 && contourArea < 5000)
             {
                 peri = cv::arcLength(contours[i], true);
                 cv::approxPolyDP(contours[i], conPoly[i], 0.02 * peri, true);
@@ -180,11 +176,10 @@ public:
                 }
             }
         }
-        RCLCPP_INFO(get_logger(), "%lu triangles found", index.size());
+        RCLCPP_INFO(get_logger(), "%lu targets found", index.size());
 
         if (index.size() == 4)
         {
-
             center = (circle[index[0]] + circle[index[1]] + circle[index[2]] + circle[index[3]]) / 4;
             RCLCPP_INFO(get_logger(), "center: (%f, %f)", center.x, center.y);
 
@@ -213,7 +208,7 @@ public:
                     }
                 }
 
-                //circle = filter(circle);
+                // circle = filter(circle);
 
                 for (const auto &point : Points)
                 {
@@ -236,12 +231,15 @@ public:
                 cv::line(frame_copy, circle[index[3]], circle[index[0]], cv::Scalar(255, 0, 0), 2);
                 cv::circle(frame_copy, center, 5, cv::Scalar(0, 100, 200), cv::FILLED);
             }
+            RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[0].x, circle[0].y);
+            RCLCPP_INFO(this->get_logger(), "circle[1] (%f, %f)", circle[1].x, circle[1].y);
+            RCLCPP_INFO(this->get_logger(), "circle[2] (%f, %f)", circle[2].x, circle[2].y);
+            RCLCPP_INFO(this->get_logger(), "circle[3] (%f, %f)", circle[3].x, circle[3].y);
         }
         RCLCPP_INFO(get_logger(), "Points_size: %lu", Points.size());
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
         publisher_->publish(*msg_);
     }
-
 
     // for (size_t i = 0;i< index.size(); i++)
     // {
