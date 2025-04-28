@@ -140,7 +140,7 @@ public:
         cv::Scalar lowerHSV(hmin, smin, vmin);
         cv::Scalar upperHSV(hmax, smax, vmax);
         cv::inRange(frame, lowerHSV, upperHSV, frame);
-        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(23, 23));
+        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(21, 21));
         ero_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 1));
         cv::erode(frame, frame, ero_kernel);
         cv::dilate(frame, frame, dil_kernel);
@@ -173,6 +173,8 @@ public:
                     cv::minEnclosingCircle(cv::Mat(conPoly[i]), circle[i], radius[i]);
                     index.push_back(i);
                     cv::minEnclosingTriangle(contours[i], triangle[i]);
+                    RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[i].x, circle[i].y);
+
                 }
             }
         }
@@ -219,22 +221,21 @@ public:
                 }
                 for (const auto &point : circle)
                 {
-                    if (point.x >= 0 && point.x < frame_copy.cols && point.y >= 0 && point.y < frame_copy.rows)
+                    if (point.x > 0 && point.x < frame_copy.cols && point.y > 0 && point.y < frame_copy.rows)
                     {
                         cv::circle(frame_copy, point, 5, cv::Scalar(0, 0, 255), cv::FILLED);
                     }
                 }
-
-                cv::line(frame_copy, circle[index[0]], circle[index[1]], cv::Scalar(255, 0, 0), 2);
-                cv::line(frame_copy, circle[index[1]], circle[index[2]], cv::Scalar(255, 0, 0), 2);
-                cv::line(frame_copy, circle[index[2]], circle[index[3]], cv::Scalar(255, 0, 0), 2);
-                cv::line(frame_copy, circle[index[3]], circle[index[0]], cv::Scalar(255, 0, 0), 2);
-                cv::circle(frame_copy, center, 5, cv::Scalar(0, 100, 200), cv::FILLED);
             }
-            RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[0].x, circle[0].y);
-            RCLCPP_INFO(this->get_logger(), "circle[1] (%f, %f)", circle[1].x, circle[1].y);
-            RCLCPP_INFO(this->get_logger(), "circle[2] (%f, %f)", circle[2].x, circle[2].y);
-            RCLCPP_INFO(this->get_logger(), "circle[3] (%f, %f)", circle[3].x, circle[3].y);
+            cv::line(frame_copy, circle[index[0]], circle[index[1]], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle[index[1]], circle[index[2]], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle[index[2]], circle[index[3]], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle[index[3]], circle[index[0]], cv::Scalar(255, 0, 0), 2);
+            cv::circle(frame_copy, center, 5, cv::Scalar(0, 100, 200), cv::FILLED);
+            // RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[0].x, circle[0].y);
+            // RCLCPP_INFO(this->get_logger(), "circle[1] (%f, %f)", circle[1].x, circle[1].y);
+            // RCLCPP_INFO(this->get_logger(), "circle[2] (%f, %f)", circle[2].x, circle[2].y);
+            // RCLCPP_INFO(this->get_logger(), "circle[3] (%f, %f)", circle[3].x, circle[3].y);
         }
         RCLCPP_INFO(get_logger(), "Points_size: %lu", Points.size());
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
