@@ -25,12 +25,13 @@ private:
     float peri;
     std::vector<std::vector<cv::Point>> conPoly;
     std::vector<std::vector<cv::Point2f>> triangle;
-    std::vector<cv::Point2f> circle;
+    std::vector<cv::Point2f> circle, circle_pt_sorted, Points_float, triangle_pt_sorted, point_temp;
     std::vector<float> radius, Point2O;
     std::vector<int> index;
     std::vector<cv::Point> Points;
-    std::queue<std::vector<cv::Point2f>> point_queue;
+    std::queue<std::vector<cv::Point2f>> point_queue_circle, point_queue_triangle;
     cv::Point2f center;
+    cv::Point max_corner;
     cv::Mat camera_matrix, distortion_coefficients, rectification_matrix, projection_matrix, rvec, tvec;
     std::vector<cv::Point2f> objPoints;
     cv::Mat obj2Cam = cv::Mat::zeros(3, 3, CV_64FC1);
@@ -46,11 +47,12 @@ public:
         publisher_ = this->create_publisher<sensor_msgs::msg::Image>("processed_image", 10);
         this->broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         subscriber_ = this->create_subscription<sensor_msgs::msg::Image>("redeem_box_image", 10, [&](const sensor_msgs::msg::Image::SharedPtr msg) -> void
-        {
-            image_preprocess(msg);
-             // pnpSolver();
-             // publish_tf(tvec, roll, pitch, yaw);
-        });
+                                                                         {
+                                                                             image_preprocess(msg);
+                                                                             targeting();
+                                                                             // pnpSolver();
+                                                                             // publish_tf(tvec, roll, pitch, yaw);
+                                                                         });
     }
 
     void loadCameraParams()
@@ -63,10 +65,22 @@ public:
         fs.release();
     }
 
-    std::vector<cv::Point2f> filter(std::vector<cv::Point2f> &points)
+    std::vector<cv::Point2f> filter(std::vector<cv::Point2f> &points, std::queue<std::vector<cv::Point2f>> &point_queue)
     {
-        std::vector<cv::Point2f> point_temp(4);
-        if (point_queue.size() < 2 && index.size() == 4)
+        point_temp.resize(4, cv::Point2f(0.0, 0.0));
+
+        auto isZeroPoint = [](const cv::Point2f &pt)
+        {
+            return pt.x == 0.0f && pt.y == 0.0f;
+        };
+
+        if (points.size() != 4 || std::any_of(points.begin(), points.end(), isZeroPoint))
+        {
+            RCLCPP_WARN(this->get_logger(), "Invalid or zero points in input, skipping filter");
+            return point_temp;
+        }
+
+        if (point_queue.size() < 2)
         {
             point_queue.push(points);
         }
@@ -78,16 +92,77 @@ public:
 
         if (point_queue.size() == 2)
         {
-            for (size_t i = 0; i < point_queue.back().size(); i++)
+            const auto &newest = point_queue.back();
+            const auto &oldest = point_queue.front();
+
+            if (newest.size() == 4 && oldest.size() == 4 &&
+                !std::any_of(newest.begin(), newest.end(), isZeroPoint) &&
+                !std::any_of(oldest.begin(), oldest.end(), isZeroPoint))
             {
-                point_temp[i] = point_queue.back()[i] * 0.2 + point_queue.front()[i] * 0.8;
+                for (size_t i = 0; i < 4; i++)
+                {
+                    point_temp[i] = newest[i] * 0.2f + oldest[i] * 0.8f;
+                }
+            }
+            else
+            {
+                RCLCPP_WARN(this->get_logger(), "Queue contains zero points, skipping filter");
             }
             return point_temp;
         }
-        else
+
+        return point_temp;
+    }
+
+    std::vector<cv::Point2f> sortPointsClockwise(const std::vector<cv::Point2f> &points, const cv::Point2f &center)
+    {
+        std::vector<std::pair<cv::Point2f, double>> angle_point_pairs;
+
+        for (const auto &pt : points)
         {
-            return point_temp;
+            double angle = atan2(pt.y - center.y, pt.x - center.x);
+            angle_point_pairs.emplace_back(pt, angle);
         }
+
+        std::sort(angle_point_pairs.begin(), angle_point_pairs.end(),
+                  [](const std::pair<cv::Point2f, double> &a, const std::pair<cv::Point2f, double> &b)
+                  {
+                      return a.second > b.second;
+                  });
+
+        std::vector<cv::Point2f> sorted;
+        for (const auto &pair : angle_point_pairs)
+        {
+            sorted.push_back(pair.first);
+        }
+
+        return sorted;
+    }
+
+    bool DistVarianceValidation(const std::vector<cv::Point2f> &circle_pts, const std::vector<cv::Point2f> &triangle_pts, float max_variance = 100.0f)
+    {
+        if (circle_pts.size() != 4 || triangle_pts.size() != 4)
+            return false;
+
+        std::vector<float> dists;
+        for (int i = 0; i < 4; ++i)
+        {
+            float d = cv::norm(circle_pts[i] - triangle_pts[i]);
+            dists.push_back(d);
+        }
+
+        float mean = std::accumulate(dists.begin(), dists.end(), 0.0f) / dists.size();
+
+        float variance = 0.0f;
+        for (float d : dists)
+        {
+            variance += (d - mean) * (d - mean);
+        }
+        variance /= dists.size();
+
+        RCLCPP_INFO(rclcpp::get_logger("validate"), "circle↔triangle dist variance: %.2f", variance);
+
+        return variance < max_variance;
     }
 
     void pnpSolver()
@@ -123,7 +198,6 @@ public:
         broadcaster_->sendTransform(transformation);
     }
 
-
     void image_preprocess(const sensor_msgs::msg::Image::SharedPtr msg)
     {
         framePtr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
@@ -140,13 +214,18 @@ public:
         cv::Scalar lowerHSV(hmin, smin, vmin);
         cv::Scalar upperHSV(hmax, smax, vmax);
         cv::inRange(frame, lowerHSV, upperHSV, frame);
-        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(21, 21));
+        dil_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(13, 13));
         ero_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 1));
-        cv::erode(frame, frame, ero_kernel);
+        // cv::erode(frame, frame, ero_kernel);
         cv::dilate(frame, frame, dil_kernel);
+        cv::morphologyEx(frame, frame, cv::MORPH_CLOSE, dil_kernel);
         cv::findContours(frame, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-        RCLCPP_INFO(get_logger(), "%lu contours found", contours.size());
+        cv::drawContours(frame, contours, -1, cv::Scalar(255), cv::FILLED);
+        //RCLCPP_INFO(get_logger(), "%lu contours found", contours.size());
+    }
 
+    void targeting()
+    {
         conPoly.clear();
         triangle.clear();
         circle.clear();
@@ -154,6 +233,9 @@ public:
         Points.clear();
         index.clear();
         conPoly.clear();
+        circle_pt_sorted.clear();
+        triangle_pt_sorted.clear();
+        Points_float.clear();
 
         conPoly.resize(contours.size());
         triangle.resize(contours.size());
@@ -163,7 +245,7 @@ public:
         for (size_t i = 0; i < contours.size(); i++)
         {
             contourArea = cv::contourArea(contours[i]);
-            if (contourArea > 1000 && contourArea < 5000)
+            if (contourArea > 500 && contourArea < 3000)
             {
                 peri = cv::arcLength(contours[i], true);
                 cv::approxPolyDP(contours[i], conPoly[i], 0.02 * peri, true);
@@ -173,17 +255,16 @@ public:
                     cv::minEnclosingCircle(cv::Mat(conPoly[i]), circle[i], radius[i]);
                     index.push_back(i);
                     cv::minEnclosingTriangle(contours[i], triangle[i]);
-                    RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[i].x, circle[i].y);
-
                 }
             }
         }
-        RCLCPP_INFO(get_logger(), "%lu targets found", index.size());
+        //RCLCPP_INFO(get_logger(), "%lu targets found", index.size());
 
         if (index.size() == 4)
         {
             center = (circle[index[0]] + circle[index[1]] + circle[index[2]] + circle[index[3]]) / 4;
-            RCLCPP_INFO(get_logger(), "center: (%f, %f)", center.x, center.y);
+
+            //RCLCPP_INFO(get_logger(), "center: (%f, %f)", center.x, center.y);
 
             for (int i = 0; i < std::min(4, static_cast<int>(index.size())); i++)
             {
@@ -197,47 +278,70 @@ public:
                                             (triangle[index[i]][1].y - triangle[index[i]][0].y) * (triangle[index[i]][1].y - triangle[index[i]][0].y);
 
                     if (length0_square > length1_square && length0_square > length2_square)
-                    {
-                        Points.push_back(cv::Point(triangle[index[i]][0]));
-                    }
+                        max_corner = triangle[index[i]][0];
                     else if (length1_square > length0_square && length1_square > length2_square)
-                    {
-                        Points.push_back(cv::Point(triangle[index[i]][1]));
-                    }
-                    else if (length2_square > length0_square && length2_square > length1_square)
-                    {
-                        Points.push_back(cv::Point(triangle[index[i]][2]));
-                    }
-                }
+                        max_corner = triangle[index[i]][1];
+                    else
+                        max_corner = triangle[index[i]][2];
 
-                // circle = filter(circle);
-
-                for (const auto &point : Points)
-                {
-                    if (point.x >= 0 && point.x < frame_copy.cols && point.y >= 0 && point.y < frame_copy.rows)
-                    {
-                        cv::circle(frame_copy, point, 5, cv::Scalar(0, 255, 0), cv::FILLED);
-                    }
-                }
-                for (const auto &point : circle)
-                {
-                    if (point.x > 0 && point.x < frame_copy.cols && point.y > 0 && point.y < frame_copy.rows)
-                    {
-                        cv::circle(frame_copy, point, 5, cv::Scalar(0, 0, 255), cv::FILLED);
-                    }
+                    Points_float.emplace_back(static_cast<cv::Point2f>(max_corner));
                 }
             }
-            cv::line(frame_copy, circle[index[0]], circle[index[1]], cv::Scalar(255, 0, 0), 2);
-            cv::line(frame_copy, circle[index[1]], circle[index[2]], cv::Scalar(255, 0, 0), 2);
-            cv::line(frame_copy, circle[index[2]], circle[index[3]], cv::Scalar(255, 0, 0), 2);
-            cv::line(frame_copy, circle[index[3]], circle[index[0]], cv::Scalar(255, 0, 0), 2);
+
+            circle_pt_sorted = sortPointsClockwise({circle[index[0]], circle[index[1]], circle[index[2]], circle[index[3]]}, center);
+            triangle_pt_sorted = sortPointsClockwise(Points_float, center);
+
+            //RCLCPP_INFO(this->get_logger(), "triangle_pt_sorted num: %lu", triangle_pt_sorted.size());
+            //RCLCPP_INFO(this->get_logger(), "circle_pt_sorted num: %lu", circle_pt_sorted.size());
+
+            circle_pt_sorted = filter(circle_pt_sorted, point_queue_circle);
+            triangle_pt_sorted = filter(triangle_pt_sorted, point_queue_triangle);
+
+            if(!DistVarianceValidation(circle_pt_sorted, triangle_pt_sorted))
+            {
+                //RCLCPP_WARN(this->get_logger(), "circle and triangle points variance too large");
+                return;
+            }
+
+            for (const auto &point : triangle_pt_sorted)
+            {
+                if (point.x >= 0 && point.x < frame_copy.cols && point.y >= 0 && point.y < frame_copy.rows)
+                {
+                    cv::circle(frame_copy, point, 5, cv::Scalar(0, 255, 0), cv::FILLED);
+                }
+            }
+            for (const auto &point : circle_pt_sorted)
+            {
+                if (point.x > 0 && point.x < frame_copy.cols && point.y > 0 && point.y < frame_copy.rows)
+                {
+                    cv::circle(frame_copy, point, 5, cv::Scalar(0, 0, 255), cv::FILLED);
+                }
+            }
+
+            cv::line(frame_copy, circle_pt_sorted[0], circle_pt_sorted[1], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[1], circle_pt_sorted[2], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[2], circle_pt_sorted[3], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[3], circle_pt_sorted[0], cv::Scalar(255, 0, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[0], triangle_pt_sorted[0], cv::Scalar(0, 255, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[1], triangle_pt_sorted[1], cv::Scalar(0, 255, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[2], triangle_pt_sorted[2], cv::Scalar(0, 255, 0), 2);
+            cv::line(frame_copy, circle_pt_sorted[3], triangle_pt_sorted[3], cv::Scalar(0, 255, 0), 2);
+            cv::line(frame_copy, triangle_pt_sorted[0], triangle_pt_sorted[1], cv::Scalar(0, 0, 255), 2);
+            cv::line(frame_copy, triangle_pt_sorted[1], triangle_pt_sorted[2], cv::Scalar(0, 0, 255), 2);
+            cv::line(frame_copy, triangle_pt_sorted[2], triangle_pt_sorted[3], cv::Scalar(0, 0, 255), 2);
+            cv::line(frame_copy, triangle_pt_sorted[3], triangle_pt_sorted[0], cv::Scalar(0, 0, 255), 2);
+
             cv::circle(frame_copy, center, 5, cv::Scalar(0, 100, 200), cv::FILLED);
-            // RCLCPP_INFO(this->get_logger(), "circle[0] (%f, %f)", circle[0].x, circle[0].y);
-            // RCLCPP_INFO(this->get_logger(), "circle[1] (%f, %f)", circle[1].x, circle[1].y);
-            // RCLCPP_INFO(this->get_logger(), "circle[2] (%f, %f)", circle[2].x, circle[2].y);
-            // RCLCPP_INFO(this->get_logger(), "circle[3] (%f, %f)", circle[3].x, circle[3].y);
+            cv::putText(frame_copy, "0", circle_pt_sorted[0], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 255), 2);
+            cv::putText(frame_copy, "1", circle_pt_sorted[1], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
+            cv::putText(frame_copy, "2", circle_pt_sorted[2], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
+            cv::putText(frame_copy, "3", circle_pt_sorted[3], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
+            cv::putText(frame_copy, "center", center, cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 255), 2);
+            cv::putText(frame_copy, "0", triangle_pt_sorted[0], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 255), 2);
+            cv::putText(frame_copy, "1", triangle_pt_sorted[1], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
+            cv::putText(frame_copy, "2", triangle_pt_sorted[2], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
+            cv::putText(frame_copy, "3", triangle_pt_sorted[3], cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 155, 255), 2);
         }
-        RCLCPP_INFO(get_logger(), "Points_size: %lu", Points.size());
         auto msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame_copy).toImageMsg();
         publisher_->publish(*msg_);
     }
