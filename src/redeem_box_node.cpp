@@ -33,7 +33,10 @@ private:
     cv::Point2f center;
     cv::Point max_corner;
     cv::Mat camera_matrix, distortion_coefficients, rectification_matrix, projection_matrix, rvec, tvec;
-    std::vector<cv::Point2f> objPoints;
+    std::vector<cv::Point3f> objPoints = {cv::Point3f(0.0f, 0.0f, 0.0f),
+                                          cv::Point3f(240.0f, 0.0f, 0.0f),
+                                          cv::Point3f(240.0f,240.0f, 0.0f),
+                                          cv::Point3f(0.0f,240.0f, 0.0f)};
     cv::Mat obj2Cam = cv::Mat::zeros(3, 3, CV_64FC1);
     geometry_msgs::msg::TransformStamped transformation;
     tf2::Quaternion q;
@@ -43,21 +46,21 @@ public:
     explicit redeem_box_node(const std::string &node_name) : Node(node_name)
     {
         RCLCPP_INFO(get_logger(), "redeem_box_node launched");
-        // loadCameraParams();
+        loadCameraParams();
         publisher_ = this->create_publisher<sensor_msgs::msg::Image>("processed_image", 10);
         this->broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         subscriber_ = this->create_subscription<sensor_msgs::msg::Image>("redeem_box_image", 10, [&](const sensor_msgs::msg::Image::SharedPtr msg) -> void
                                                                          {
                                                                              image_preprocess(msg);
                                                                              targeting();
-                                                                             // pnpSolver();
-                                                                             // publish_tf(tvec, roll, pitch, yaw);
+                                                                             pnpSolver();
+                                                                             //publish_tf(tvec, roll, pitch, yaw);
                                                                          });
     }
 
     void loadCameraParams()
     {
-        cv::FileStorage fs("/home/ooofieee/Code/ws_0/src/engineer_vision_pkg/config/test.yaml", cv::FileStorage::READ);
+        cv::FileStorage fs("/home/mac/Code/ws_0/src/engineer_vision_pkg/config/camera_info.yaml", cv::FileStorage::READ);
         fs["camera_matrix"] >> camera_matrix;
         fs["distortion_coefficients"] >> distortion_coefficients;
         fs["rectification_matrix"] >> rectification_matrix;
@@ -167,13 +170,20 @@ public:
 
     void pnpSolver()
     {
-        bool succees = cv::solvePnP(objPoints, Points, camera_matrix, distortion_coefficients, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
-        if (!succees)
+        if(circle_pt_sorted.size() != 4 || triangle_pt_sorted.size() != 4)
+        {
+            RCLCPP_WARN(get_logger(), "Invalid number of points for PnP");
+            return;
+        }
+        bool succees = cv::solvePnP(objPoints, circle_pt_sorted, camera_matrix, distortion_coefficients, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
+        if (succees)
         {
             Rodrigues(rvec, obj2Cam);
             roll = atan2(obj2Cam.at<double>(2, 1), obj2Cam.at<double>(2, 2));
             pitch = atan2(-obj2Cam.at<double>(2, 0), sqrt(obj2Cam.at<double>(2, 1) * obj2Cam.at<double>(2, 1) + obj2Cam.at<double>(2, 2) * obj2Cam.at<double>(2, 2)));
             yaw = atan2(obj2Cam.at<double>(1, 0), obj2Cam.at<double>(0, 0));
+            RCLCPP_INFO(get_logger(), "tvec: (%f, %f, %f)", tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+            RCLCPP_INFO(get_logger(), "rvec: (%f, %f, %f)", roll, pitch, yaw);
         }
         else
         {
@@ -184,17 +194,36 @@ public:
 
     void publish_tf(const cv::Mat &translation, double roll, double pitch, double yaw)
     {
+        if (!(translation.rows == 3 && translation.cols == 1) &&
+            !(translation.rows == 1 && translation.cols == 3))
+        {
+            RCLCPP_WARN(this->get_logger(), "Invalid translation shape: expected 3x1 or 1x3, got %dx%d", translation.rows, translation.cols);
+            return;
+        }
+    
+        if (translation.type() != CV_64F)
+        {
+            RCLCPP_WARN(this->get_logger(), "Invalid translation type: expected CV_64F");
+            return;
+        }
+    
+        if (!std::isfinite(roll) || !std::isfinite(pitch) || !std::isfinite(yaw))
+        {
+            RCLCPP_WARN(this->get_logger(), "Invalid rotation angles: roll=%f, pitch=%f, yaw=%f", roll, pitch, yaw);
+            return;
+        }
+    
         transformation.header.stamp = this->get_clock()->now();
         transformation.header.frame_id = "camera";
         transformation.child_frame_id = "target";
-
+    
         transformation.transform.translation.x = translation.at<double>(0);
         transformation.transform.translation.y = translation.at<double>(1);
         transformation.transform.translation.z = translation.at<double>(2);
-
+    
         q.setRPY(roll, pitch, yaw);
         transformation.transform.rotation = tf2::toMsg(q);
-
+    
         broadcaster_->sendTransform(transformation);
     }
 
