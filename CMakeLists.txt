@@ -22,8 +22,10 @@ find_package(serial REQUIRED)
 add_executable(video_capturer_node src/video_capturer_node.cpp)
 add_executable(redeem_box_node src/redeem_box_node.cpp)
 add_executable(hsv_detector src/hsv_detector.cpp)
-# add_executable(serial_node src/serial_node.cpp)
-# add_executable(yolo_node src/yolo_node.cpp)
+add_executable(serial_node src/serial_node.cpp)
+add_executable(serial src/serial.cpp)
+add_executable(video_saver_node src/video_saver_node.cpp)
+add_executable(yolo_node src/yolo_node.cpp)
 ament_target_dependencies(video_capturer_node rclcpp sensor_msgs cv_bridge std_msgs)
 ament_target_dependencies(hsv_detector rclcpp sensor_msgs cv_bridge)
 ament_target_dependencies(redeem_box_node
@@ -37,12 +39,15 @@ ament_target_dependencies(redeem_box_node
   geometry_msgs
   serial
 )
-# ament_target_dependencies(serial_node rclcpp tf2 tf2_ros tf2_geometry_msgs geometry_msgs)
-# ament_target_dependencies(yolo_node rclcpp sensor_msgs cv_bridge)
+ament_target_dependencies(serial_node rclcpp tf2 tf2_ros tf2_geometry_msgs geometry_msgs)
+ament_target_dependencies(video_saver_node rclcpp sensor_msgs cv_bridge)
+ament_target_dependencies(yolo_node rclcpp sensor_msgs cv_bridge)
+ament_target_dependencies(serial rclcpp serial)
 target_link_libraries(video_capturer_node ${OpenCV_LIBRARIES})
 target_link_libraries(redeem_box_node ${OpenCV_LIBRARIES})
 target_link_libraries(hsv_detector ${OpenCV_LIBRARIES})
-# target_link_libraries(yolo_node ${OpenCV_LIBRARIES})
+target_link_libraries(video_saver_node ${OpenCV_LIBRARIES})
+target_link_libraries(yolo_node ${OpenCV_LIBRARIES})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -57,8 +62,13 @@ if(BUILD_TESTING)
 endif()
 
 install(
-  TARGETS video_capturer_node redeem_box_node hsv_detector
+  TARGETS video_capturer_node redeem_box_node video_saver_node serial_node serial yolo_node hsv_detector
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}/
 )
 
 ament_package()
