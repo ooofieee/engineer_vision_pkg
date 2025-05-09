@@ -10,16 +10,17 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr subscriber_;
     cv::VideoWriter video_writer;
     std::string video_path;
+    bool is_writer_initialized_ = false;
 
 public:
     video_saver_node():Node("video_saver_node")
     {
-        video_path = "/home/RECORD";
+        video_path = "/home/mac/RECORD";
 
         subscriber_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "image_raw",
+            "processed_image",
             10,
-            std::bind(&video_saver_node::image_callback, this, std::placeholders::_1, false)
+            std::bind(&video_saver_node::image_callback, this, std::placeholders::_1)
         );
     }
 
@@ -27,23 +28,26 @@ public:
     {
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
         cv::Mat frame = cv_ptr->image;
-        if(frame.empty())
+        if (frame.empty())
         {
             RCLCPP_ERROR(this->get_logger(), "Received empty frame");
             return;
         }
 
-        std::filesystem::create_directories(video_path);
-        video_writer.open(video_path + "/output.avi", cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), 60, frame.size(), true);
+        if (!is_writer_initialized_)
+        {
+            video_writer.open(video_path + "/output.mp4", cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 30, frame.size(), true);
 
-        if (video_writer.isOpened())
-        {
-            video_writer.write(frame);
+            if (!video_writer.isOpened())
+            {
+                RCLCPP_ERROR(this->get_logger(), "Could not open the video writer");
+                return;
+            }
+
+            is_writer_initialized_ = true;
         }
-        else
-        {
-            RCLCPP_ERROR(this->get_logger(), "Could not open the video writer");
-        }
+
+        video_writer.write(frame);
     }       
 };
 
