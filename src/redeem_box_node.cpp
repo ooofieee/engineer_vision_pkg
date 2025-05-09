@@ -179,6 +179,7 @@ public:
         if (succees)
         {
             Rodrigues(rvec, obj2Cam);
+            obj2Cam = obj2Cam.t();
             roll = atan2(obj2Cam.at<double>(2, 1), obj2Cam.at<double>(2, 2));
             pitch = atan2(-obj2Cam.at<double>(2, 0), sqrt(obj2Cam.at<double>(2, 1) * obj2Cam.at<double>(2, 1) + obj2Cam.at<double>(2, 2) * obj2Cam.at<double>(2, 2)));
             yaw = atan2(obj2Cam.at<double>(1, 0), obj2Cam.at<double>(0, 0));
